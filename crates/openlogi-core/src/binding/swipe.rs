@@ -266,12 +266,7 @@ impl SwipeAccumulator {
                     self.dx = 0;
                     self.dy = 0;
                     if !self.ready(dir, now) {
-                        // Keep the path's slope when bounding its distance.
-                        // distance <= repeat, so scaling cannot enlarge drift.
-                        let scaled = i64::from(self.repeat_cross) * i64::from(distance)
-                            / i64::from(self.repeat);
-                        self.repeat_cross = i32::try_from(scaled).unwrap_or(self.repeat_cross);
-                        self.repeat = distance;
+                        self.bound_pending_repeat(distance);
                         return None;
                     }
                     // Carry the excess, so a report spanning two repeat
@@ -336,6 +331,14 @@ impl SwipeAccumulator {
             return self.emit(dir, now);
         }
         None
+    }
+
+    /// Bound distance and sideways drift together, preserving the stroke's slope.
+    fn bound_pending_repeat(&mut self, distance: i32) {
+        // distance <= repeat, so scaling cannot enlarge drift.
+        let scaled = i64::from(self.repeat_cross) * i64::from(distance) / i64::from(self.repeat);
+        self.repeat_cross = i32::try_from(scaled).unwrap_or(self.repeat_cross);
+        self.repeat = distance;
     }
 
     fn ready(&self, direction: GestureDirection, now: Instant) -> bool {

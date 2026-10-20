@@ -55,6 +55,8 @@ pub struct GestureOutputs {
     actions: ActionDispatcher,
     scroll: ScrollInputHandle,
     hook_maps: SharedHookMaps,
+    #[cfg(target_os = "macos")]
+    observable: Arc<crate::observable::ObservableState>,
 }
 
 impl GestureOutputs {
@@ -64,12 +66,34 @@ impl GestureOutputs {
         actions: ActionDispatcher,
         scroll: ScrollInputHandle,
         hook_maps: SharedHookMaps,
+        observable: Arc<crate::observable::ObservableState>,
     ) -> Self {
+        #[cfg(not(target_os = "macos"))]
+        drop(observable);
         Self {
             actions,
             scroll,
             hook_maps,
+            #[cfg(target_os = "macos")]
+            observable,
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn accessibility_granted(&self) -> bool {
+        self.observable
+            .read(|snapshot| snapshot.status.accessibility_granted)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn foreground_app_id(&self) -> Option<String> {
+        self.observable.read(|snapshot| {
+            snapshot
+                .foreground
+                .current
+                .as_ref()
+                .map(|app| app.id.clone())
+        })
     }
 
     fn cancel_session(&self, session: &HidppSessionId) {
@@ -251,6 +275,7 @@ fn reconcile_session(
         }
         ReconcileAction::Retiring => {
             dispatcher.cancel_gesture_session(session.id(), session.dispatch());
+            dispatcher.cancel_zoom_session(session.id());
         }
         ReconcileAction::None => {}
     }
@@ -491,6 +516,11 @@ impl GestureManagerState {
         receiver_requests: &watch::Receiver<ReceiverRequestState>,
         capture_plans: &SharedCapturePlans,
     ) -> bool {
+        if device_io_allowed {
+            self.input_dispatcher.resume_zoom();
+        } else {
+            self.input_dispatcher.pause_zoom();
+        }
         match event {
             SessionEvent::Input(event) => {
                 let key = &event.physical_key;
@@ -509,11 +539,12 @@ impl GestureManagerState {
                 let live = self.slots.get(key).and_then(GestureSlot::session);
                 let dispatch_context = dispatch_context_for(&event.session, live);
                 if let Some((session, plan)) = dispatch_context {
-                    let admission = if live.is_some_and(RunningSession::is_active) {
-                        GestureAdmission::Active
-                    } else {
-                        GestureAdmission::Restoring
-                    };
+                    let admission =
+                        if device_io_allowed && live.is_some_and(RunningSession::is_active) {
+                            GestureAdmission::Active
+                        } else {
+                            GestureAdmission::Restoring
+                        };
                     self.input_dispatcher
                         .dispatch(session, plan, event.input, admission);
                 } else {
@@ -572,6 +603,7 @@ async fn drain_for_shutdown(
     capture_plans: &SharedCapturePlans,
     channels: &SessionChannels,
 ) {
+    let zoom_cleanup = state.input_dispatcher.shutdown_zoom();
     for session in state
         .slots
         .values_mut()
@@ -623,6 +655,7 @@ async fn drain_for_shutdown(
             state.expedite_pending_restores();
         }
     }
+    zoom_cleanup.await;
 }
 
 /// The gesture manager as the shared loop drives it: many slots, one weak
@@ -636,7 +669,12 @@ impl CaptureManager for GestureManager {
     type Published = Arc<CapturePublication>;
     type Event = SessionEvent;
 
+    fn pause_input(&mut self) {
+        self.state.input_dispatcher.pause_zoom();
+    }
+
     async fn reconcile(&mut self, requests: ReceiverRequestState, published: &Self::Published) {
+        self.state.input_dispatcher.resume_zoom();
         self.state
             .reconcile(requests, true, published, &self.channels)
             .await;

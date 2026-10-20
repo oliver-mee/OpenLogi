@@ -188,7 +188,12 @@ async fn recovery_manager_waits_for_control_events_and_shutdown_between_retries(
             capture_plans,
             receiver_requests: access.subscribe_requests(),
             access: device_access,
-            outputs: GestureOutputs::new(actions.dispatcher(), scroll.input(), Arc::default()),
+            outputs: GestureOutputs::new(
+                actions.dispatcher(),
+                scroll.input(),
+                Arc::default(),
+                Arc::new(crate::observable::ObservableState::new("test".into()))
+            ),
             shutdown,
         }));
 
@@ -809,6 +814,7 @@ async fn a_pointer_only_plan_refresh_keeps_a_held_gesture() {
         actions.dispatcher(),
         scroll.input(),
         Arc::default(),
+        Arc::new(crate::observable::ObservableState::new("test".into())),
     ));
 
     let mut held = plan();
@@ -871,7 +877,12 @@ fn gesture_dispatcher() -> (
         VerticalScrollSensitivity::default(),
     )))
     .unwrap();
-    let outputs = GestureOutputs::new(actions, scroll.input(), Arc::default());
+    let outputs = GestureOutputs::new(
+        actions,
+        scroll.input(),
+        Arc::default(),
+        Arc::new(crate::observable::ObservableState::new("test".into())),
+    );
     let dispatcher = InputDispatcher::new(outputs);
     (dispatcher, owner, events, scroll)
 }

@@ -3,6 +3,8 @@
 mod inject;
 #[cfg(target_os = "linux")]
 pub mod uinput;
+mod zoom;
+pub use zoom::{ZoomContext, ZoomGesture, ZoomPhase, cursor_location, zoom_process_id};
 
 pub use inject::{
     HeldChord, SYNTHETIC_EVENT_USER_DATA, SmoothScrollPhase, ax_navigate_browser, execute,
