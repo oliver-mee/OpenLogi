@@ -19,7 +19,8 @@ use std::future::Future;
 use openlogi_core::config::{ConfigRevision, Lighting};
 use openlogi_core::hid::{
     BacklightChange, BacklightState, DeviceRoute, Dpi, DpiInfo, EasySwitchHosts, FnLockState,
-    LightCommand, ReceiverSelector, ReportRate, ReportRateInfo, SmartShiftStatus, WriteError,
+    LightCommand, PointerSpeed, ReceiverSelector, ReportRate, ReportRateInfo, SmartShiftStatus,
+    WriteError,
 };
 use openlogi_ipc::{
     AgentClient, ChosenLight, ConfigReloadError, PairingCommandError, PairingFailure, SavedConfig,
@@ -100,10 +101,15 @@ fn log_rejection(what: &str, outcome: Result<Result<(), WriteError>, Unavailable
     }
 }
 
-/// Apply a DPI value to a device now.
+/// Write a DPI value to a device now, answered as [`GuiUpdate::DpiWritten`]
+/// with the device's verdict.
 pub struct SetDpi {
     pub route: DeviceRoute,
     pub dpi: Dpi,
+    pub key: DeviceKey,
+    /// The number the state gave this write, returned with the answer so it
+    /// is matched to the write it answers.
+    pub write: u64,
 }
 
 impl Request for SetDpi {
@@ -115,8 +121,13 @@ impl Request for SetDpi {
             .await
     }
 
-    fn deliver(self, outcome: Result<Self::Answer, Unavailable>, _: &UpdateSender) {
-        log_rejection("DPI", outcome);
+    fn deliver(self, outcome: Result<Self::Answer, Unavailable>, updates: &UpdateSender) {
+        let _ = updates.send(GuiUpdate::DpiWritten {
+            key: self.key,
+            write: self.write,
+            dpi: self.dpi,
+            result: or_unavailable(outcome),
+        });
     }
 }
 
@@ -190,6 +201,31 @@ impl Request for SetReportRate {
         let _ = updates.send(GuiUpdate::ReportRateWritten {
             key: self.key,
             route: self.route,
+            result: or_unavailable(outcome),
+        });
+    }
+}
+
+/// Write a mouse's pointer speed now, answered as
+/// [`GuiUpdate::PointerSpeedWritten`] with what the mouse reads back.
+pub struct SetPointerSpeed {
+    pub route: DeviceRoute,
+    pub speed: PointerSpeed,
+    pub key: DeviceKey,
+}
+
+impl Request for SetPointerSpeed {
+    type Answer = Result<PointerSpeed, WriteError>;
+
+    async fn call(&self, client: &AgentClient) -> Result<Self::Answer, RpcError> {
+        client
+            .set_pointer_speed(context::current(), self.route.clone(), self.speed)
+            .await
+    }
+
+    fn deliver(self, outcome: Result<Self::Answer, Unavailable>, updates: &UpdateSender) {
+        let _ = updates.send(GuiUpdate::PointerSpeedWritten {
+            key: self.key,
             result: or_unavailable(outcome),
         });
     }
@@ -404,6 +440,26 @@ impl Request for ReadReportRate {
     async fn call(&self, client: &AgentClient) -> Result<Self::Answer, RpcError> {
         client
             .read_report_rate(context::current(), self.route.clone())
+            .await
+    }
+
+    fn deliver(self, outcome: Result<Self::Answer, Unavailable>, _: &UpdateSender) {
+        let _ = self.reply.send(or_unavailable(outcome));
+    }
+}
+
+/// Read a mouse's pointer speed; the answer goes back over `reply`.
+pub struct ReadPointerSpeed {
+    pub route: DeviceRoute,
+    pub reply: oneshot::Sender<Result<PointerSpeed, WriteError>>,
+}
+
+impl Request for ReadPointerSpeed {
+    type Answer = Result<PointerSpeed, WriteError>;
+
+    async fn call(&self, client: &AgentClient) -> Result<Self::Answer, RpcError> {
+        client
+            .read_pointer_speed(context::current(), self.route.clone())
             .await
     }
 
@@ -723,12 +779,14 @@ commands! {
     SetSmartShift,
     SetFnLock,
     SetReportRate,
+    SetPointerSpeed,
     SetBacklight,
     RenameEasySwitchHost,
     ReadDpi,
     ReadSmartShift,
     ReadFnLock,
     ReadReportRate,
+    ReadPointerSpeed,
     ReadBacklight,
     ReadEasySwitchHosts,
     LoadConfig,

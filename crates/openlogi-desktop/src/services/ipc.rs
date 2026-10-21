@@ -41,8 +41,8 @@
 use std::time::{Duration, Instant};
 
 use openlogi_core::hid::{
-    BacklightState, DeviceRoute, EasySwitchHosts, FnLockState, LightCommand, ReportRateInfo,
-    WriteError,
+    BacklightState, DeviceRoute, Dpi, EasySwitchHosts, FnLockState, LightCommand, PointerSpeed,
+    ReportRateInfo, WriteError,
 };
 use openlogi_ipc::SavedConfig;
 use openlogi_ipc::client::{self, ConnectError};
@@ -67,9 +67,10 @@ use request::LinkLost;
 pub use request::PollEventMonitor;
 pub use request::{
     CancelPairing, Command, LoadConfig, PairDevice, ReadBacklight, ReadDpi, ReadEasySwitchHosts,
-    ReadFnLock, ReadReportRate, ReadSmartShift, ReloadConfig, RenameEasySwitchHost,
-    RequestAccessibilityPrompt, SetBacklight, SetDpi, SetFnLock, SetLight, SetLightManualPower,
-    SetLighting, SetReportRate, SetSmartShift, StartPairing, UnpairDevice,
+    ReadFnLock, ReadPointerSpeed, ReadReportRate, ReadSmartShift, ReloadConfig,
+    RenameEasySwitchHost, RequestAccessibilityPrompt, SetBacklight, SetDpi, SetFnLock, SetLight,
+    SetLightManualPower, SetLighting, SetPointerSpeed, SetReportRate, SetSmartShift, StartPairing,
+    UnpairDevice,
 };
 
 /// How long to wait before retrying a connect that failed. This is a retry
@@ -104,6 +105,18 @@ pub enum GuiUpdate {
     },
     /// Whether the agent adopted the config currently on disk.
     ConfigReloadResult(Result<(), ConfigReloadError>),
+    /// The device's verdict on a DPI write the GUI asked for: taken, or the
+    /// typed refusal. Answers [`SetDpi`].
+    DpiWritten {
+        /// The device that was written.
+        key: DeviceKey,
+        /// Which write this answers: [`SetDpi::write`].
+        write: u64,
+        /// The DPI that was written.
+        dpi: Dpi,
+        /// `Ok` once the device took `dpi`, or why it did not.
+        result: Result<(), WriteError>,
+    },
     /// What a keyboard reports after an Fn-lock write the GUI asked for: the
     /// state it took, or the typed refusal. Answers [`SetFnLock`].
     FnLockWritten {
@@ -122,6 +135,14 @@ pub enum GuiUpdate {
         route: DeviceRoute,
         /// The read-back, or why the write did not land.
         result: Result<ReportRateInfo, WriteError>,
+    },
+    /// What a mouse reports after a pointer-speed write the GUI asked for:
+    /// the speed it took, or the typed refusal. Answers [`SetPointerSpeed`].
+    PointerSpeedWritten {
+        /// The mouse that was written.
+        key: DeviceKey,
+        /// The read-back, or why the write did not land.
+        result: Result<PointerSpeed, WriteError>,
     },
     /// What a keyboard reports after a backlight change the GUI asked for:
     /// the backlight it reads back, or the typed refusal. Answers
@@ -801,6 +822,7 @@ mod tests {
                 agent_version: "observe-loop-test".to_owned(),
                 input_monitoring_granted: true,
                 hid_open_failures: false,
+                secure_input: openlogi_ipc::SecureInput::Off,
             },
             inventory: Vec::new(),
             standalone: Vec::new(),
