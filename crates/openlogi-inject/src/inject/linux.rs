@@ -226,6 +226,61 @@ fn dispatch_generic_linux_native(action: &Action, native: NativeAction) {
     }
 }
 
+/// Serialize the complete pulse with held-chord transitions and with every
+/// other writer of the existing virtual device. Physical keyboard ownership
+/// belongs to its separate evdev device; we release only this virtual device.
+fn post_zoom(direction: i8) {
+    let output = super::HELD_OUTPUT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(device) = &*VIRTUAL_INPUT else {
+        tracing::debug!("uinput action device unavailable — zoom skipped");
+        return;
+    };
+    let Ok(mut device) = device.lock() else {
+        tracing::warn!("uinput action device mutex poisoned");
+        return;
+    };
+    if let Err(error) = zoom_pulse(
+        output.owners.contains_key(&HeldKey::Control),
+        direction,
+        |events| device.emit(events),
+    ) {
+        tracing::warn!(%error, "Linux Control-wheel zoom injection failed");
+    }
+}
+
+fn zoom_pulse(
+    control_held: bool,
+    direction: i8,
+    mut inject: impl FnMut(&[InputEvent]) -> io::Result<()>,
+) -> io::Result<()> {
+    // A discrete zoom tick never consumes the fractional scroll accumulator.
+    let wheel = scroll_events(
+        &mut ScrollOutput::default(),
+        ScrollDelta::wheel_ticks(0.0, f64::from(direction)),
+    );
+    if control_held {
+        return inject(&wheel);
+    }
+    let result = inject(&held_key_events(&[KeyCode::KEY_LEFTCTRL], KeyPhase::Down))
+        .and_then(|()| inject(&wheel));
+    // uinput can fail after a partial write, including its SYN_REPORT. Attempt
+    // release even when the down frame failed, because acceptance is unknown.
+    let release = held_key_events(&[KeyCode::KEY_LEFTCTRL], KeyPhase::Up);
+    let mut cleanup = inject(&release);
+    for _ in 0..2 {
+        if cleanup.is_ok() {
+            break;
+        }
+        cleanup = inject(&release);
+    }
+    if let Err(error) = &cleanup {
+        tracing::error!(%error, "uinput rejected Control release after zoom cleanup retries");
+    }
+    result.and(cleanup)
+}
+
 fn dispatch_hyprland_native(action: &Action, native: NativeAction) {
     match native {
         NativeAction::MissionControl | NativeAction::AppExpose | NativeAction::ShowDesktop => {
@@ -241,6 +296,8 @@ fn dispatch_hyprland_native(action: &Action, native: NativeAction) {
             press_key(&[], KeyCode::KEY_SYSRQ);
         }
         NativeAction::Sleep => sleep_system(),
+        NativeAction::ZoomIn => post_zoom(1),
+        NativeAction::ZoomOut => post_zoom(-1),
     }
 }
 
@@ -426,61 +483,6 @@ fn resolve_allowlisted_under(name: &str, prefixes: &[&str]) -> Option<PathBuf> {
         .iter()
         .map(|prefix| Path::new(prefix).join(name))
         .find(|path| path.is_file())
-}
-
-/// Serialize the complete pulse with held-chord transitions and with every
-/// other writer of the existing virtual device. Physical keyboard ownership
-/// belongs to its separate evdev device; we release only this virtual device.
-fn post_zoom(direction: i8) {
-    let output = super::HELD_OUTPUT
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let Some(device) = &*VIRTUAL_INPUT else {
-        tracing::debug!("uinput action device unavailable — zoom skipped");
-        return;
-    };
-    let Ok(mut device) = device.lock() else {
-        tracing::warn!("uinput action device mutex poisoned");
-        return;
-    };
-    if let Err(error) = zoom_pulse(
-        output.owners.contains_key(&HeldKey::Control),
-        direction,
-        |events| device.emit(events),
-    ) {
-        tracing::warn!(%error, "Linux Control-wheel zoom injection failed");
-    }
-}
-
-fn zoom_pulse(
-    control_held: bool,
-    direction: i8,
-    mut inject: impl FnMut(&[InputEvent]) -> io::Result<()>,
-) -> io::Result<()> {
-    // A discrete zoom tick never consumes the fractional scroll accumulator.
-    let wheel = scroll_events(
-        &mut ScrollOutput::default(),
-        ScrollDelta::wheel_ticks(0.0, f64::from(direction)),
-    );
-    if control_held {
-        return inject(&wheel);
-    }
-    let result = inject(&held_key_events(&[KeyCode::KEY_LEFTCTRL], KeyPhase::Down))
-        .and_then(|()| inject(&wheel));
-    // uinput can fail after a partial write, including its SYN_REPORT. Attempt
-    // release even when the down frame failed, because acceptance is unknown.
-    let release = held_key_events(&[KeyCode::KEY_LEFTCTRL], KeyPhase::Up);
-    let mut cleanup = inject(&release);
-    for _ in 0..2 {
-        if cleanup.is_ok() {
-            break;
-        }
-        cleanup = inject(&release);
-    }
-    if let Err(error) = &cleanup {
-        tracing::error!(%error, "uinput rejected Control release after zoom cleanup retries");
-    }
-    result.and(cleanup)
 }
 
 /// Press `mods`+`key` under GNOME; log the existing "no Linux equivalent"
