@@ -422,7 +422,13 @@ fn thumbwheel_input(
     previous: RotationStatus,
     resolution: WheelResolution,
 ) -> Option<CapturedInput> {
-    if event.rotation != 0 || event.rotation_status.is_rolling() || previous.leaves_roll_open() {
+    if event.rotation != 0
+        || matches!(
+            event.rotation_status,
+            RotationStatus::Start | RotationStatus::Active | RotationStatus::Stop
+        )
+        || previous.leaves_roll_open()
+    {
         return Some(CapturedInput::Scroll {
             increments: event.rotation,
             resolution,

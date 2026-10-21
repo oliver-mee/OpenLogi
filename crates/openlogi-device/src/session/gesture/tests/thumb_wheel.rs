@@ -160,7 +160,8 @@ fn an_unrecognised_status_still_scrolls() {
         ),
         Some(CapturedInput::Scroll {
             increments: 5,
-            resolution: TRACED_RES
+            resolution: TRACED_RES,
+            status: RotationStatus::Other(0xff),
         })
     );
 }

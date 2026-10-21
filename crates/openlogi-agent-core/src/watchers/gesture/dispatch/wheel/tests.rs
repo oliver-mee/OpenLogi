@@ -1022,3 +1022,14 @@ fn zoom_unphased_movement_continues_after_a_pending_end() {
         WheelOutput::FireAction(1)
     );
 }
+
+#[test]
+fn unknown_phase_zoom_uses_motion_but_never_a_zero_report() {
+    use openlogi_hid::thumbwheel::RotationStatus;
+    let mut wheel = WheelAccumulators::default();
+    let now = Instant::now();
+    assert!(!wheel.prepare_zoom_report(RotationStatus::Other(4), 0, now));
+    assert!(!wheel.prepare_zoom_report(RotationStatus::Other(4), 1, now));
+    assert!(wheel.prepare_zoom_report(RotationStatus::Other(4), 1, now));
+    assert!(!wheel.prepare_zoom_report(RotationStatus::Other(4), 0, now));
+}
