@@ -51,11 +51,15 @@ mod response {
                 self.state = None;
                 self.pending_end = None;
             }
+            // Unknown phase bytes provide no lifecycle information. Treat
+            // them like an unphased report and infer progress from motion.
+            let phase = match phase {
+                RotationStatus::Other(_) => RotationStatus::Inactive,
+                phase => phase,
+            };
             // Some supported firmware supplies rotation but no phase. Infer
             // progress from that movement without turning zero reports into it.
-            let unphased_motion =
-                matches!(phase, RotationStatus::Inactive | RotationStatus::Other(_))
-                    && increments != 0;
+            let unphased_motion = phase == RotationStatus::Inactive && increments != 0;
             let phase = if unphased_motion {
                 RotationStatus::Active
             } else {
