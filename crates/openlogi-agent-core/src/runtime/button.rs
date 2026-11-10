@@ -370,7 +370,6 @@ enum ButtonCommand {
     },
     CancelSource(ButtonSource),
     CancelHooks,
-    CancelContext,
     CancelPointerExcept(openlogi_hook::PointerTarget),
     Wake,
 }
@@ -420,13 +419,6 @@ impl ButtonState {
 
     fn cancel_hooks(&mut self) -> Vec<ActivePress> {
         self.cancel_where(|key| matches!(key.source, ButtonSource::OsHook(_)))
-    }
-
-    fn cancel_context(&mut self) -> Vec<ActivePress> {
-        self.active
-            .extract_if(|_, press| !matches!(press.behavior, PressBehavior::LifecycleOnly))
-            .map(|(_, press)| press)
-            .collect()
     }
 
     fn cancel_all(&mut self) -> Vec<ActivePress> {
@@ -556,10 +548,6 @@ impl ButtonInputHandle {
 
     pub(crate) fn cancel_hooks(&self) {
         self.try_command(ButtonCommand::CancelHooks);
-    }
-
-    pub(crate) fn cancel_context(&self) {
-        self.try_command(ButtonCommand::CancelContext);
     }
 
     pub(crate) fn cancel_pointer_except(&self, current: openlogi_hook::PointerTarget) {

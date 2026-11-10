@@ -509,17 +509,6 @@ impl SharedHandles {
     }
 }
 
-/// Lifecycle admission result of a foreground-context publication.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ForegroundChange {
-    /// The app identity did not change.
-    Unchanged,
-    /// Context changed while effective bindings stayed equal; gesture holds survive.
-    ContextOnly,
-    /// Effective bindings changed; old press capabilities must be invalidated.
-    BindingsChanged,
-}
-
 /// Owns the config + device selection and keeps [`SharedHandles`] in sync.
 pub struct Orchestrator {
     config: Config,
@@ -1751,13 +1740,13 @@ impl Orchestrator {
     /// and republishing for it could restart a capture session (a plan's
     /// divert set is part of its identity) over nothing. The observable cell
     /// still gets the whole value — it dedupes on its own, and its recent list
-    /// is the only source a client has for these identifiers. The result
-    /// distinguishes ordinary context cancellation from gesture invalidation.
-    pub fn set_current_app(&mut self, app: Option<ForegroundApp>) -> ForegroundChange {
+    /// is the only source a client has for these identifiers. Returns whether
+    /// effective bindings changed and old presses must be invalidated.
+    pub fn set_current_app(&mut self, app: Option<ForegroundApp>) -> bool {
         let id = app.as_ref().map(|app| app.id.clone());
         self.observable.set_foreground(app);
         if id == self.current_app {
-            return ForegroundChange::Unchanged;
+            return false;
         }
         let previous = self.hook_maps_for(self.current_key());
         let previous_keys = self
@@ -1772,7 +1761,7 @@ impl Orchestrator {
         // them with the keyboard's effective bindings.
         self.publish_device_runtime();
         let next = self.hook_maps_for(self.current_key());
-        let changed = previous.bindings != next.bindings
+        previous.bindings != next.bindings
             || previous.gestures != next.gestures
             || previous_keys
                 != self
@@ -1780,12 +1769,7 @@ impl Orchestrator {
                     .keyboard_bindings
                     .read()
                     .ok()
-                    .map(|keys| keys.clone());
-        if changed {
-            ForegroundChange::BindingsChanged
-        } else {
-            ForegroundChange::ContextOnly
-        }
+                    .map(|keys| keys.clone())
     }
 
     /// Publish a pointer-window change separately from keyboard focus. The
